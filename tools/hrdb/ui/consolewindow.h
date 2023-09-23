@@ -31,7 +31,7 @@ private:
     void connectChanged();
     void settingsChanged();
     void textEditChanged();
-    void fileChanged(const QString& filename);
+    void logMessage(const char* pStr);
 
     void deleteWatcher();
     QLineEdit*          m_pLineEdit;
@@ -40,11 +40,6 @@ private:
     Session*            m_pSession;
     TargetModel*        m_pTargetModel;
     Dispatcher*         m_pDispatcher;
-
-    // Data to watch and read the temporary file output by Hatari
-    QFileSystemWatcher* m_pWatcher;
-    QFile               m_tempFile;
-    QTextStream         m_tempFileTextStream;
 };
 
 #endif // CONSOLEWINDOW_H

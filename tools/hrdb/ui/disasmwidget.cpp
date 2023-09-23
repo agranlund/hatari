@@ -10,6 +10,7 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCompleter>
 #include <QPainter>
 #include <QSettings>
@@ -34,6 +35,7 @@ DisasmWidget::DisasmWidget(QWidget *parent, Session* pSession, int windowIndex):
     m_logicalAddr(0),
     m_requestId(0),
     m_bFollowPC(true),
+    m_memorySpace(kSpaceLogical),
     m_windowIndex(windowIndex),
     m_pSession(pSession),
     m_pTargetModel(pSession->m_pTargetModel),
@@ -120,7 +122,27 @@ void DisasmWidget::RequestMemory()
     uint32_t size = highAddr - lowAddr;
     if (m_pTargetModel->IsConnected())
     {
-        m_requestId = m_pDispatcher->ReadMemory(m_memSlot, lowAddr, size);
+        uint32_t flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagProgram; 
+        if (!m_bFollowPC)
+        {
+            switch (GetMemorySpace())
+            {
+                default:
+                case kSpacePhysical:
+                    flags = Dispatcher::MemoryFlags::kMemFlagPhysical;
+                    break;
+                case kSpaceLogical:
+                    flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagProgram;
+                    break;
+                case kSpaceLogicalSuper:
+                    flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagProgram | Dispatcher::MemoryFlags::kMemFlagSuper;
+                    break;
+                case kSpaceLogicalUser:
+                    flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagProgram | Dispatcher::MemoryFlags::kMemFlagUser;
+                    break;
+            }
+        }
+        m_requestId = m_pDispatcher->ReadMemory(m_memSlot, lowAddr, size, flags);
     }
 }
 
@@ -968,6 +990,13 @@ void DisasmWidget::SetFollowPC(bool bFollow)
     update();
 }
 
+void DisasmWidget::SetMemorySpace(MemorySpace space)
+{
+    m_memorySpace = space;
+    RequestMemory();
+    update();
+}
+
 void DisasmWidget::printEA(const operand& op, const Registers& regs, uint32_t address, QTextStream& ref) const
 {
     uint32_t ea;
@@ -975,7 +1004,7 @@ void DisasmWidget::printEA(const operand& op, const Registers& regs, uint32_t ad
     // Only do a full analysis if this is the PC and therefore the registers are valid...
     if (Disassembler::calc_fixed_ea(op, address == m_pTargetModel->GetStartStopPC(), regs, address, ea))
     {
-        ea &= 0xffffff; // mask for ST hardware range
+        ea &= m_pTargetModel->GetAddressMask();
         ref << "$" << QString::asprintf("%x", ea);
         QString sym = DescribeSymbol(m_pTargetModel->GetSymbolTable(), ea);
         if (!sym.isEmpty())
@@ -1164,12 +1193,21 @@ DisasmWindow::DisasmWindow(QWidget *parent, Session* pSession, int windowIndex) 
     auto pTopRegion = new QWidget(this);    // top buttons/edits
     //pMainGroupBox->setFlat(true);
 
+    m_pMemorySpaceComboBox = new QComboBox(this);
+    m_pMemorySpaceComboBox->insertItem(DisasmWidget::kSpacePhysical, "Physical");
+    m_pMemorySpaceComboBox->insertItem(DisasmWidget::kSpaceLogical, "Logical");
+    m_pMemorySpaceComboBox->insertItem(DisasmWidget::kSpaceLogicalSuper, "Logical (Super)");
+    m_pMemorySpaceComboBox->insertItem(DisasmWidget::kSpaceLogicalUser, "Logical (User)");
+    m_pMemorySpaceComboBox->setCurrentIndex(m_pDisasmWidget->GetMemorySpace());
+
     SetMargins(pTopLayout);
     pTopLayout->addWidget(m_pAddressEdit);
     pTopLayout->addWidget(m_pFollowPC);
     pTopLayout->addWidget(m_pShowHex);
+    pTopLayout->addWidget(m_pMemorySpaceComboBox);
 
-    SetMargins(pMainLayout);
+    pMainLayout->setSpacing(0);
+    pMainLayout->setContentsMargins(0,0,0,0);
     pMainLayout->addWidget(pTopRegion);
     pMainLayout->addWidget(m_pDisasmWidget);
     pMainLayout->setAlignment(Qt::Alignment(Qt::AlignTop));
@@ -1200,6 +1238,7 @@ DisasmWindow::DisasmWindow(QWidget *parent, Session* pSession, int windowIndex) 
     connect(m_pShowHex,     &QCheckBox::stateChanged,                 this, &DisasmWindow::showHexClickedSlot);
     connect(m_pSession,     &Session::addressRequested,               this, &DisasmWindow::requestAddress);
     connect(m_pTargetModel, &TargetModel::searchResultsChangedSignal, this, &DisasmWindow::searchResultsSlot);
+    connect(m_pMemorySpaceComboBox, &QComboBox::currentIndexChanged,  this, &DisasmWindow::memorySpaceComboBoxChangedSlot);
 
     this->resizeEvent(nullptr);
 }
@@ -1215,6 +1254,7 @@ void DisasmWindow::requestAddress(Session::WindowType type, int windowIndex, uin
     m_pDisasmWidget->SetAddress(std::to_string(address));
     m_pDisasmWidget->SetFollowPC(false);
     m_pFollowPC->setChecked(false);
+    m_pMemorySpaceComboBox->setDisabled(false);
     setVisible(true);
     raise();
     this->keyFocus();
@@ -1235,8 +1275,13 @@ void DisasmWindow::loadSettings()
     //restoreGeometry(settings.value("geometry").toByteArray());
     m_pDisasmWidget->SetShowHex(settings.value("showHex", QVariant(true)).toBool());
     m_pDisasmWidget->SetFollowPC(settings.value("followPC", QVariant(true)).toBool());
+    int space = settings.value("space", QVariant(DisasmWidget::kSpaceLogical)).toInt();
+    m_pDisasmWidget->SetMemorySpace(static_cast<DisasmWidget::MemorySpace>(space));
     m_pShowHex->setChecked(m_pDisasmWidget->GetShowHex());
     m_pFollowPC->setChecked(m_pDisasmWidget->GetFollowPC());
+    m_pMemorySpaceComboBox->setCurrentIndex(m_pDisasmWidget->GetMemorySpace());
+    m_pMemorySpaceComboBox->setEnabled(!m_pDisasmWidget->GetFollowPC());
+
     settings.endGroup();
 }
 
@@ -1249,6 +1294,7 @@ void DisasmWindow::saveSettings()
     //settings.setValue("geometry", saveGeometry());
     settings.setValue("showHex", m_pDisasmWidget->GetShowHex());
     settings.setValue("followPC", m_pDisasmWidget->GetFollowPC());
+    settings.setValue("space", static_cast<int>(m_pDisasmWidget->GetMemorySpace()));
     settings.endGroup();
 }
 
@@ -1298,7 +1344,23 @@ void DisasmWindow::showHexClickedSlot()
 
 void DisasmWindow::followPCClickedSlot()
 {
+    if (m_pFollowPC->isChecked())
+    {
+        m_pDisasmWidget->SetMemorySpace(DisasmWidget::MemorySpace::kSpaceLogical);
+        m_pMemorySpaceComboBox->setCurrentIndex(m_pDisasmWidget->GetMemorySpace());
+        m_pMemorySpaceComboBox->setDisabled(true);
+    }
+    else
+    {
+        m_pMemorySpaceComboBox->setDisabled(false);
+    }
+
     m_pDisasmWidget->SetFollowPC(m_pFollowPC->isChecked());
+}
+
+void DisasmWindow::memorySpaceComboBoxChangedSlot(int index)
+{
+    m_pDisasmWidget->SetMemorySpace((DisasmWidget::MemorySpace)index);
 }
 
 void DisasmWindow::UpdateTextBox()

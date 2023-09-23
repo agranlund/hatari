@@ -527,7 +527,10 @@ bool HardwareFieldAddr::Update(const TargetModel* pTarget)
     case Type::BasePage:
         if (!memBase)
             break;
-        valid = memBase->ReadAddressMulti(m_address, 4, address);
+        {
+            uint32_t base = memBase->GetAddress();
+            valid = memBase->ReadAddressMulti(base + m_address, 4, address);
+        }
         break;
     case Type::Mfp:
         {
@@ -542,7 +545,7 @@ bool HardwareFieldAddr::Update(const TargetModel* pTarget)
     }
     if (valid)
     {
-        address &= 0xffffff;
+        address &= pTarget->GetAddressMask();
         m_memAddress = address;
         QString str = QString::asprintf("$%08x", address);
         QString sym = DescribeSymbol(pTarget->GetSymbolTable(), address);
@@ -1146,7 +1149,8 @@ HardwareWindow::HardwareWindow(QWidget *parent, Session* pSession) :
 
     // Layouts
     QVBoxLayout* pMainLayout = new QVBoxLayout();
-    SetMargins(pMainLayout);
+    pMainLayout->setSpacing(0);
+    pMainLayout->setContentsMargins(0,0,0,0);
     QHBoxLayout* pTopLayout = new QHBoxLayout;
     auto pTopRegion = new QWidget(this);      // top buttons/edits
     SetMargins(pTopLayout);
@@ -1181,6 +1185,7 @@ HardwareWindow::HardwareWindow(QWidget *parent, Session* pSession) :
     connect(m_pTargetModel,  &TargetModel::memoryChangedSignal,    this, &HardwareWindow::memoryChanged);
     connect(m_pTargetModel,  &TargetModel::flushSignal,            this, &HardwareWindow::flush);
 
+    connect(m_pSession,      &Session::mainStateUpdated,           this, &HardwareWindow::mainStateUpdated);
     connect(m_pSession,      &Session::settingsChanged,            this, &HardwareWindow::settingsChanged);
 
     // Refresh enable state
@@ -1315,7 +1320,7 @@ void HardwareWindow::memoryChanged(int memorySlot, uint64_t /*commandId*/)
         {
             // We combine the upper 4 bits with the lower 4 bits of the MFP interrupt type
             uint32_t vecIndex = vecBase * 16;
-            uint32_t vecAddr = vecIndex * 4;
+            uint32_t vecAddr = (vecIndex * 4) + m_pTargetModel->GetVbr();
 
             // Request memory
             m_pDispatcher->ReadMemory(MemorySlot::kHardwareWindowMfpVecs, vecAddr, 4 * 32);
@@ -1324,6 +1329,17 @@ void HardwareWindow::memoryChanged(int memorySlot, uint64_t /*commandId*/)
             // The flush's callback will trigger recalculation of the table model.
             m_flushUid = m_pDispatcher->InsertFlush();
         }
+    }
+}
+
+//-----------------------------------------------------------------------------
+void HardwareWindow::mainStateUpdated()
+{
+    const Memory* pBasePageMem = m_pTargetModel->GetMemory(MemorySlot::kBasePage);
+    if (pBasePageMem && (pBasePageMem->GetAddress() != m_pTargetModel->GetVbr()))
+    {
+        m_pDispatcher->ReadMemory(MemorySlot::kBasePage, m_pTargetModel->GetVbr(), 0x200);
+        memoryChanged(MemorySlot::kHardwareWindowMfp, 0);
     }
 }
 

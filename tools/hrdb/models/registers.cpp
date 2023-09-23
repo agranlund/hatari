@@ -8,13 +8,26 @@ const char* Registers::s_names[] =
     "A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7",
     "PC", "SR",
     "USP", "ISP",
-    // Exception number
+    // 68020+
     "CAAR",
     "CACR",
     "DFC",
     "MSP",
     "SFC",
     "VBR",
+    // 68030+
+    "CRP",
+    "URP",
+    "SRP",
+    "SRPH",
+    "TC",
+    "DTT0",
+    "DTT1",
+    "ITT0",
+    "ITT1",
+    "MMUSR",
+    "BUSCR",
+    // Exception number
     "EX",
     // Vars
     "AesOpcode",
@@ -56,6 +69,7 @@ const char *Registers::GetSRBitName(uint32_t bit)
     case kTrace1: return "Trace1";
     case kTrace0: return "Trace0";
     case kSupervisor: return "Supervisor";
+    case kMaster: return "Master/Interrupt";
     case kIPL2: return "Interrupt Priority 2";
     case kIPL1: return "Interrupt Priority 1";
     case kIPL0: return "Interrupt Priority 0";

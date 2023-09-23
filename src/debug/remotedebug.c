@@ -39,7 +39,10 @@
 #include "symbols.h"
 #include "log.h"
 #include "vars.h"
+#include "options_cpu.h"
 #include "memory.h"
+#include "cpummu.h"
+#include "cpummu030.h"
 #include "configuration.h"
 #include "psg.h"
 #include "dmaSnd.h"
@@ -86,6 +89,13 @@ static bool bRemoteBreakIsActive = false;
 	character value range so that 32-255 can be used */
 #define SEPARATOR_VAL	0x1
 
+#define MEMFLAG_PHYS            0
+#define MEMFLAG_LOGICAL         (1 << 0)
+#define MEMFLAG_SUPER           (1 << 1)
+#define MEMFLAG_USER            (1 << 2)
+#define MEMFLAG_DATA            (1 << 3)
+#define MEMFLAG_PROGRAM         (1 << 4)
+
 // -----------------------------------------------------------------------------
 // Structure managing a resizeable buffer of uint8_t
 // This can be used to accumulate input commands, or sections of it
@@ -112,6 +122,51 @@ static void RemoteDebugBuffer_UnInit(RemoteDebugBuffer* buf)
 	buf->data = NULL;
 	buf->size = 0;
 	buf->write_pos = 0;
+}
+
+
+// -----------------------------------------------------------------------------
+static Uint32 RemoteDebug_TranslateMemoryAddress(bool write, Uint32 flag, Uint32 addr)
+{
+    if ((flag & MEMFLAG_LOGICAL) && (currprefs.mmu_model >= 68030))
+    {
+        bool super, data;
+       
+        if (flag & MEMFLAG_SUPER)
+            super = true;
+        else if (flag & MEMFLAG_USER)
+            super = false;
+        else
+            super = regs.s;
+
+        if (flag & MEMFLAG_PROGRAM)
+            data = false;
+        else
+            data = true;
+
+		TRY(p) {
+			if (currprefs.mmu_model >= 68040)
+				addr = mmu_translate(addr, 0, super, data, write, 0);
+			else
+				addr = mmu030_translate(addr, super, data, write);
+		} CATCH(p) {
+		} ENDTRY
+    }
+    return addr;    
+}
+
+// -----------------------------------------------------------------------------
+static Uint8 RemoteDebug_ReadByte(Uint32 flag, Uint32 addr)
+{
+    addr = RemoteDebug_TranslateMemoryAddress(false, flag, addr);
+    return STMemory_ReadByte(addr);
+}
+
+// -----------------------------------------------------------------------------
+static void RemoteDebug_WriteByte(Uint32 flag, Uint32 addr, Uint8 val)
+{
+    addr = RemoteDebug_TranslateMemoryAddress(true, flag, addr);
+    STMemory_WriteByte(addr, val);
 }
 
 // -----------------------------------------------------------------------------
@@ -171,14 +226,9 @@ typedef struct RemoteDebugState
 	char cmd_buf[RDB_INPUT_TMP_SIZE];
 
 	/* Redirection info when running Console window commands */
-	FILE* original_debugOutput;				/* This is easy to save and repoint */
-#ifdef __WINDOWS__
-	char consoleOutputFilename[PATH_MAX+1];	/* output filename for redirected output */
-#else
-	FILE* original_stdout;					/* original file pointers for redirecting output */
-	FILE* original_stderr;
-	FILE* consoleOutputFile;				/* our file handle to output */
-#endif
+	int original_stdout;					/* original file pointers for redirecting output */
+	int original_stderr;
+    int logpipe[2];
 
 	/* Output (send) buffer data */
 	char sendBuffer[RDB_SEND_BUFFER_SIZE];	/* buffer for replies */
@@ -344,56 +394,35 @@ static void RemoteDebug_NotifyProfile(RemoteDebugState* state)
 	send_term(state);
 }
 
-// -----------------------------------------------------------------------------
-/* Repoint stderr and debugOutput to the file specified in the state. */
-static void RemoteDebug_OpenDebugOutput(RemoteDebugState* state)
+static void RemoteDebug_NotifyLog(RemoteDebugState* state)
 {
-	// NOTE: debugOutput is for "m" and "d", "r"
-	// stderr is for breakpoints, "info"
-	state->original_debugOutput = debugOutput;
+    while (1)
+    {
+        char buf[128];
+        int bytes = read(state->logpipe[0], buf, 127);
+        if (bytes <= 0)
+            break;
 
-#ifdef __WINDOWS__
-	// Handle output not being set
-	if (state->consoleOutputFilename[0] == 0)
-		return;
-
-	// Repoint
-	freopen(state->consoleOutputFilename, "w", stdout);
-	freopen(state->consoleOutputFilename, "w", stderr);
-	debugOutput = stderr;
-#else
-	// Save old values for restore
-	state->original_stderr = stderr;
-	state->original_stdout = stdout;
-
-	// Handle output not being set
-	if (!state->consoleOutputFile)
-		return;
-
-	// Repoint
-	debugOutput = state->consoleOutputFile;
-	stderr = state->consoleOutputFile;
-	stdout = state->consoleOutputFile;
-#endif
+        buf[bytes] = 0;
+        send_str(state, "!log");
+        send_sep(state);
+        send_str(state, buf);
+        send_term(state);
+    }
 }
 
 // -----------------------------------------------------------------------------
-/* Restore any debugOutput settings to the original saved state. Close
-   any file we opened. */
+static void RemoteDebug_OpenDebugOutput(RemoteDebugState* state)
+{
+    dup2(state->logpipe[1], STDOUT_FILENO);
+    dup2(state->logpipe[1], STDERR_FILENO);
+}
+
+// -----------------------------------------------------------------------------
 static void RemoteDebug_CloseDebugOutput(RemoteDebugState* state)
 {
-	/* Restore old stdio, if set */
-#ifdef __WINDOWS__
-	freopen("CON", "w", stdout);
-	freopen("CON", "w", stderr);
-#else
-	stderr = state->original_stderr;
-	stdout = state->original_stdout;
-	state->original_stderr = NULL;
-	state->original_stdout = NULL;
-#endif
-	debugOutput = state->original_debugOutput;
-	state->original_debugOutput = NULL;
+    dup2(state->original_stdout, STDOUT_FILENO);
+    dup2(state->original_stderr, STDERR_FILENO);
 }
 
 /* Call per-system methods to make sure that any state inspected
@@ -518,22 +547,57 @@ static int RemoteDebug_regs(int nArgc, char *psArgs[], RemoteDebugState* state)
 		++varIndex;
 	}
 
-	if (ConfigureParams.System.nCpuLevel >= 2)
+	if (currprefs.cpu_model >= 68010)
 	{
-		send_key_value(state, "CAAR", regs.caar);
+        send_key_value(state, "SFC", regs.sfc);
+        send_key_value(state, "DFC", regs.dfc);
+        send_key_value(state, "VBR", regs.vbr);
+    }
+
+	if (currprefs.cpu_model >= 68020)
+	{
 		send_key_value(state, "CACR", regs.cacr);
-		send_key_value(state, "DFC", regs.dfc);
 		send_key_value(state, "MSP", regs.msp);
-		send_key_value(state, "SFC", regs.sfc);
-		send_key_value(state, "VBR", regs.vbr);
+    	if (currprefs.cpu_model < 68040)
+        {
+		    send_key_value(state, "CAAR", regs.caar);
+        }
 	}
+
+    if (currprefs.mmu_model == 68030)
+    {
+        send_key_value(state, "CRP", (uint32_t) (((uint64_t)crp_030) & 0xFFFFFFFFUL));
+        send_key_value(state, "URP", (uint32_t) (((uint64_t)crp_030) >> 32));
+        send_key_value(state, "SRP", (uint32_t) (((uint64_t)srp_030) & 0xFFFFFFFF));
+        send_key_value(state, "SRPH", (uint32_t) (((uint64_t)srp_030) >> 32));
+        send_key_value(state, "TC", tc_030);
+        send_key_value(state, "DTT0", tt0_030);
+        send_key_value(state, "DTT1", tt1_030);
+        send_key_value(state, "MMUSR", mmusr_030);
+    }
+    else if (currprefs.mmu_model >= 68040)
+    {
+        send_key_value(state, "URP", regs.urp);
+        send_key_value(state, "SRP", regs.srp);
+        send_key_value(state, "TC", regs.tcr);
+        send_key_value(state, "DTT0", regs.dtt0);
+        send_key_value(state, "DTT1", regs.dtt1);
+        send_key_value(state, "ITT0", regs.itt0);
+        send_key_value(state, "ITT1", regs.itt1);
+        send_key_value(state, "MMUSR", regs.mmusr);
+    }
+    if (currprefs.mmu_model >= 68060)
+    {
+        send_key_value(state, "BUSCR", regs.buscr);
+    }    
+
 	return 0;
 }
 
 /**
  * Dump the requested area of ST memory.
  *
- * Input: "mem <start addr> <size in bytes>\n"
+ * Input: "mem <start addr> <size in bytes> <flag>\n"
  *
  * Output: "mem <address-expr> <size-expr> <memory as base16 string>\n"
  */
@@ -543,6 +607,7 @@ static int RemoteDebug_mem(int nArgc, char *psArgs[], RemoteDebugState* state)
 	int arg;
 	Uint32 memdump_addr = 0;
 	Uint32 memdump_count = 0;
+    Uint32 memdump_flag = 0;
 	int offset = 0;
 	const char* err_str = NULL;
 
@@ -558,7 +623,14 @@ static int RemoteDebug_mem(int nArgc, char *psArgs[], RemoteDebugState* state)
 		err_str = Eval_Expression(psArgs[arg], &memdump_count, &offset, false);
 		if (err_str)
 			return 1;
+
 		++arg;
+        if (nArgc >= 1 + 3)
+        {
+            err_str = Eval_Expression(psArgs[arg], &memdump_flag, &offset, false);
+            if (err_str)
+                return 1;
+        }
 	}
 	else
 	{
@@ -592,7 +664,7 @@ static int RemoteDebug_mem(int nArgc, char *psArgs[], RemoteDebugState* state)
 		{
 			accum <<= 8;
 			if (read_pos < memdump_count)
-				accum |= STMemory_ReadByte(memdump_addr + read_pos);
+				accum |= RemoteDebug_ReadByte(memdump_flag, memdump_addr + read_pos);
 			++read_pos;
 		}
 
@@ -632,6 +704,7 @@ static int RemoteDebug_memset(int nArgc, char *psArgs[], RemoteDebugState* state
 	Uint32 memdump_addr = 0;
 	Uint32 memdump_end = 0;
 	Uint32 memdump_count = 0;
+    Uint32 memdump_flag = 0;
 	uint8_t valHi;
 	uint8_t valLo;
 	int offset = 0;
@@ -652,6 +725,14 @@ static int RemoteDebug_memset(int nArgc, char *psArgs[], RemoteDebugState* state
 		if (err_str)
 			return 1;
 		++arg;
+
+        if (nArgc >= 1 + 4)
+        {
+            err_str = Eval_Expression(psArgs[arg], &memdump_flag, &offset, false);
+            if (err_str)
+                return 1;
+            ++arg;
+        }
 	}
 	else
 	{
@@ -671,7 +752,7 @@ static int RemoteDebug_memset(int nArgc, char *psArgs[], RemoteDebugState* state
 		++pos;
 
 		//put_byte(memdump_addr, (valHi << 4) | valLo);
-		STMemory_WriteByte(memdump_addr, (valHi << 4) | valLo);
+		RemoteDebug_WriteByte(memdump_flag, memdump_addr, (valHi << 4) | valLo);
 		++memdump_addr;
 	}
 	send_str(state, "OK");
@@ -814,48 +895,18 @@ static int RemoteDebug_console(int nArgc, char *psArgs[], RemoteDebugState* stat
 	if (nArgc == 2)
 	{
 		// Repoint all output to any supplied file
-		RemoteDebug_OpenDebugOutput(state);
 		int cmdRet = DebugUI_ParseConsoleCommand(psArgs[1]);
 
 		/* handle a command that restarts execution */
 		if (cmdRet == DEBUGGER_END)
 			bRemoteBreakIsActive = false;
 
-		fflush(debugOutput);
-		RemoteDebug_CloseDebugOutput(state);
-
 		// Insert an out-of-band notification, in case of restart
 		RemoteDebug_NotifyState(state);
+        RemoteDebug_NotifyLog(state);
 	}
 	send_str(state, "OK");
 	return 0;
-}
-
-// -----------------------------------------------------------------------------
-/* "setstd <filename> redirects stdout/stderr to given file */
-/* returns "OK"/"NG" */
-static int RemoteDebug_setstd(int nArgc, char *psArgs[], RemoteDebugState* state)
-{
-	if (nArgc == 2)
-	{
-		// Create the output file
-		const char* filename = psArgs[1];
-#ifdef __WINDOWS__
-		strncpy(state->consoleOutputFilename, filename, PATH_MAX);
-		state->consoleOutputFilename[PATH_MAX] = 0; /* ensure terminator */
-		return 0;
-#else
-		FILE* outpipe = fopen(filename, "w");
-		if (outpipe)
-		{
-			// Save this output so that we can pipe to it later
-			state->consoleOutputFile = outpipe;
-			send_str(state, "OK");
-			return 0;
-		}
-#endif
-	}
-	return 1;
 }
 
 // -----------------------------------------------------------------------------
@@ -1054,7 +1105,6 @@ static const rdbcommand_t remoteDebugCommandList[] = {
 	{ RemoteDebug_symlist,	"symlist"	, true		},
 	{ RemoteDebug_exmask,	"exmask"	, true		},
 	{ RemoteDebug_console,	"console"	, false		},
-	{ RemoteDebug_setstd,	"setstd"	, true		},
 	{ RemoteDebug_infoym,	"infoym"	, false		},
 	{ RemoteDebug_profile,	"profile"	, true		},
 	{ RemoteDebug_resetwarm,"resetwarm"	, true		},
@@ -1177,15 +1227,13 @@ static void RemoteDebugState_Init(RemoteDebugState* state)
 	state->AcceptedFD = -1;
 	RemoteDebugBuffer_Init(&state->input_buf, RDB_CMD_BUFFER_START_SIZE);
 	memset(state->cmd_buf, 0, sizeof(state->cmd_buf));
-#ifdef __WINDOWS__
-	memset(state->consoleOutputFilename, 0, sizeof(state->consoleOutputFilename));
-#else
-	state->original_stdout = NULL;
-	state->original_stderr = NULL;
-	state->original_debugOutput = NULL;
-	state->consoleOutputFile = NULL;
-#endif
 	state->sendBufferPos = 0;
+
+    state->original_stdout = dup(STDOUT_FILENO);
+    state->original_stderr = dup(STDERR_FILENO);
+    pipe(state->logpipe);
+    int flags = fcntl(state->logpipe[0], F_GETFL) | O_NONBLOCK;
+    fcntl(state->logpipe[0], F_SETFL, flags);
 }
 
 static void RemoteDebugState_UnInit(RemoteDebugState* state)
@@ -1203,6 +1251,9 @@ static void RemoteDebugState_UnInit(RemoteDebugState* state)
 	state->AcceptedFD = -1;
 	state->SocketFD = -1;
 	RemoteDebugBuffer_UnInit(&state->input_buf);
+
+    close(state->logpipe[0]);
+    close(state->logpipe[1]);
 }
 
 static int RemoteDebugState_TryAccept(RemoteDebugState* state, bool blocking)
@@ -1241,8 +1292,10 @@ static int RemoteDebugState_TryAccept(RemoteDebugState* state, bool blocking)
 		flush_data(state);
 
 		// New connection, so do an initial report.
+        RemoteDebug_OpenDebugOutput(state);
 		RemoteDebug_NotifyConfig(state);
 		RemoteDebug_NotifyState(state);
+        RemoteDebug_NotifyLog(state);
 		flush_data(state);
 	}
 	return state->AcceptedFD;
@@ -1340,6 +1393,8 @@ static void RemoteDebugState_UpdateAccepted(RemoteDebugState* state)
 		RDB_CLOSE(state->AcceptedFD);
 		state->AcceptedFD = -1;
 
+        RemoteDebug_CloseDebugOutput(state);
+
 		// Bail out of the loop here so we don't just spin
 		return;
 	}
@@ -1395,6 +1450,7 @@ static bool RemoteDebug_BreakLoop(void)
 		RemoteDebug_NotifyConfig(state);
 		RemoteDebug_NotifyState(state);
 		RemoteDebug_NotifyProfile(state);
+        RemoteDebug_NotifyLog(state);
 		flush_data(state);
 	}
 
@@ -1453,6 +1509,7 @@ static bool RemoteDebug_BreakLoop(void)
 	{
 		RemoteDebug_NotifyConfig(state);
 		RemoteDebug_NotifyState(state);
+        RemoteDebug_NotifyLog(state);
 		flush_data(state);
 
 		SetNonBlocking(state->AcceptedFD, 1);
@@ -1612,6 +1669,13 @@ bool RemoteDebug_Update(void)
 	{
 		RemoteDebugState_Update(&g_rdbState);
 	}
+
+    if (g_rdbState.AcceptedFD != -1)
+    {
+        RemoteDebug_NotifyLog(&g_rdbState);
+        flush_data(&g_rdbState);
+    }
+
 	return bRemoteBreakIsActive;
 }
 

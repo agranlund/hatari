@@ -65,6 +65,19 @@ public:
         SFC,
         VBR,
 
+        // 68030+
+        CRP,
+        URP,        // (CRPH for 68030)
+        SRP,
+        SRPH,
+        TC,
+        DTT0,       // (TT0 on 68030)
+        DTT1,       // (TT1 on 68030)
+        ITT0,
+        ITT1,
+        MMUSR,
+        BUSCR,
+
         // Exception number
         EX,
 
@@ -100,6 +113,7 @@ public:
         kTrace1 = 15,
         kTrace0 = 14,
         kSupervisor = 13,
+        kMaster = 12,
         kIPL2 = 10,
         kIPL1 = 9,
         kIPL0 = 8,

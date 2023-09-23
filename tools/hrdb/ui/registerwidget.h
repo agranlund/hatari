@@ -71,6 +71,7 @@ private:
     int AddToken(int x, int y, QString text, TokenType type, uint32_t subIndex = 0, TokenColour colour = TokenColour::kNormal);
     int AddReg16(int x, int y, uint32_t regIndex, const Registers &prevRegs, const Registers &m_currRegs);
     int AddReg32(int x, int y, uint32_t regIndex, const Registers &prevRegs, const Registers &m_currRegs);
+    int AddReg64(int x, int y, uint32_t regIndex, const Registers &prevRegs, const Registers &m_currRegs);
 
     int AddSRBit(int x, int y, const Registers &prevRegs, const Registers &m_currRegs, uint32_t bit, const char *pName);
     int AddCACRBit(int x, int y, const Registers &prevRegs, const Registers &m_currRegs, uint32_t bit, const char *pName);

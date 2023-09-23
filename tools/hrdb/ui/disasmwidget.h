@@ -21,6 +21,15 @@ class DisasmWidget : public QWidget
 {
     Q_OBJECT
 public:
+
+    enum MemorySpace
+    {
+        kSpacePhysical,
+        kSpaceLogical,
+        kSpaceLogicalSuper,
+        kSpaceLogicalUser,
+    };
+
     DisasmWidget(QWidget * parent, Session* m_pSession, int windowIndex);
     virtual ~DisasmWidget() override;
 
@@ -32,6 +41,7 @@ public:
     bool GetShowHex() const     { return m_bShowHex; }
     bool GetInstructionAddr(int row, uint32_t& addr) const;
     bool GetEA(int row, int operandIndex, uint32_t &addr);
+    MemorySpace GetMemorySpace() const { return m_memorySpace; }
 
     bool SetAddress(std::string addr);
     bool SetSearchResultAddress(uint32_t addr);
@@ -51,6 +61,8 @@ public:
     void SetRowCount(int count);
     void SetShowHex(bool show);
     void SetFollowPC(bool follow);
+    void SetMemorySpace(MemorySpace space);
+
 signals:
     void addressChanged(uint64_t addr);
 
@@ -129,6 +141,7 @@ private:
     uint32_t m_logicalAddr;         // Most recent address that can be shown
     uint64_t m_requestId;           // Most recent memory request
     bool     m_bFollowPC;
+    MemorySpace m_memorySpace;
 
     int         m_windowIndex;
     MemorySlot  m_memSlot;
@@ -239,6 +252,7 @@ protected slots:
 
     void showHexClickedSlot();
     void followPCClickedSlot();
+    void memorySpaceComboBoxChangedSlot(int index);
 
     void findClickedSlot();
     void nextClickedSlot();
@@ -252,6 +266,7 @@ private:
     QLineEdit*      m_pAddressEdit;
     QCheckBox*      m_pShowHex;
     QCheckBox*      m_pFollowPC;
+    QComboBox*      m_pMemorySpaceComboBox;
     Session*        m_pSession;
     DisasmWidget*   m_pDisasmWidget;
     TargetModel*    m_pTargetModel;

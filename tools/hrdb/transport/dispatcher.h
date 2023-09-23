@@ -21,14 +21,25 @@ public:
 
     // Request a specific memory block.
     // Allows strings so expressions can evaluate
-    uint64_t ReadMemory(MemorySlot slot, uint32_t address, uint32_t size);
+
+    enum MemoryFlags
+    {
+        kMemFlagPhysical    = 0,
+        kMemFlagLogical     = (1 << 0),
+        kMemFlagSuper       = (1 << 1),
+        kMemFlagUser        = (1 << 2),
+        kMemFlagData        = (1 << 3),
+        kMemFlagProgram     = (1 << 4),
+    };
+
+    uint64_t ReadMemory(MemorySlot slot, uint32_t address, uint32_t size, uint32_t flags = MemoryFlags::kMemFlagLogical | MemoryFlags::kMemFlagData);
     uint64_t ReadRegisters();
     uint64_t ReadInfoYm();
     uint64_t ReadBreakpoints();
     uint64_t ReadExceptionMask();
     uint64_t ReadSymbols();
 
-    uint64_t WriteMemory(uint32_t address, const QVector<uint8_t>& data);
+    uint64_t WriteMemory(uint32_t address, const QVector<uint8_t>& data, uint32_t flags = MemoryFlags::kMemFlagLogical | MemoryFlags::kMemFlagData);
 
     // System control
     uint64_t ResetWarm();
@@ -52,7 +63,6 @@ public:
 
     uint64_t SetRegister(int reg, uint32_t val);
     uint64_t SetExceptionMask(uint32_t mask);
-    uint64_t SetLoggingFile(const std::string& filename);
     uint64_t SetProfileEnable(bool enable);
     uint64_t SetFastForward(bool enable);
     uint64_t SendConsoleCommand(const std::string& cmd);

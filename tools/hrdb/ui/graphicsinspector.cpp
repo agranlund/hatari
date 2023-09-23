@@ -201,7 +201,8 @@ GraphicsInspectorWidget::GraphicsInspectorWidget(QWidget *parent,
 
     auto pMainGroupBox = new QWidget(this);
     QVBoxLayout *vlayout = new QVBoxLayout;
-    SetMargins(vlayout);
+    vlayout->setSpacing(0);
+    vlayout->setContentsMargins(0,0,0,0);    
     vlayout->addWidget(pContainer1);
     vlayout->addWidget(pContainer2);
     vlayout->addWidget(pContainer3);

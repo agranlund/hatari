@@ -7,6 +7,7 @@
 #include <QHelpEvent>
 #include <QToolTip>
 
+#include "../models/targetmodel.h"
 #include "../models/session.h"
 #include "symboltext.h"
 
@@ -47,7 +48,7 @@ static QString CreateNumberTooltip(uint32_t value, uint32_t prevValue)
     for (int bit = 3; bit >= 0; --bit)
     {
         unsigned char val = static_cast<unsigned char>(value >> (bit * 8));
-        ref << ((val >= 32 && val < 128) ? QString(val) : ".");
+        ref << ((val >= 32 && val < 128) ? QString(QChar(val)) : ".");
     }
     ref << "\"\n";
 
@@ -328,7 +329,7 @@ void RegisterWidget::PopulateRegisters()
     int row = 0;
 
     AddReg32(0, row, Registers::PC, m_prevRegs, m_currRegs);
-    QString sym = FindSymbol(GET_REG(m_currRegs, PC) & 0xffffff);
+    QString sym = FindSymbol(GET_REG(m_currRegs, PC) & m_pTargetModel->GetAddressMask());
     if (sym.size() != 0)
         AddToken(14, row, MakeBracket(sym), TokenType::kSymbol, GET_REG(m_currRegs, PC));
 
@@ -412,7 +413,7 @@ void RegisterWidget::PopulateRegisters()
                     {
                         // Show the calculated EA
                         QString eaAddrText = QString::asprintf("$%x", finalEA);
-                        QString sym = FindSymbol(finalEA & 0xffffff);
+                        QString sym = FindSymbol(finalEA & m_pTargetModel->GetAddressMask());
                         if (sym.size() != 0)
                             eaAddrText = eaAddrText + " (" + sym + ")";
                         col = AddToken(col, row, eaAddrText, TokenType::kSymbol, finalEA, TokenColour::kCode) + 1;
@@ -428,16 +429,19 @@ void RegisterWidget::PopulateRegisters()
 
     row += 2;
     AddReg16(1, row, Registers::SR, m_prevRegs, m_currRegs);
-    AddSRBit(10, row, m_prevRegs, m_currRegs, Registers::SRBits::kTrace1, "T");
-    AddSRBit(14, row, m_prevRegs, m_currRegs, Registers::SRBits::kSupervisor, "S");
+    AddSRBit(10, row, m_prevRegs, m_currRegs, Registers::SRBits::kTrace1, "T1");
+    AddSRBit(15, row, m_prevRegs, m_currRegs, Registers::SRBits::kTrace0, "T0");
 
-    AddSRBit(19, row, m_prevRegs, m_currRegs, Registers::SRBits::kX, "X");
-    AddSRBit(23, row, m_prevRegs, m_currRegs, Registers::SRBits::kN, "N");
-    AddSRBit(27, row, m_prevRegs, m_currRegs, Registers::SRBits::kZ, "Z");
-    AddSRBit(31, row, m_prevRegs, m_currRegs, Registers::SRBits::kV, "V");
-    AddSRBit(35, row, m_prevRegs, m_currRegs, Registers::SRBits::kC, "C");
+    AddSRBit(20, row, m_prevRegs, m_currRegs, Registers::SRBits::kSupervisor, "S");
+    AddSRBit(24, row, m_prevRegs, m_currRegs, Registers::SRBits::kSupervisor, "M");
+
+    AddSRBit(28, row, m_prevRegs, m_currRegs, Registers::SRBits::kX, "X");
+    AddSRBit(32, row, m_prevRegs, m_currRegs, Registers::SRBits::kN, "N");
+    AddSRBit(36, row, m_prevRegs, m_currRegs, Registers::SRBits::kZ, "Z");
+    AddSRBit(40, row, m_prevRegs, m_currRegs, Registers::SRBits::kV, "V");
+    AddSRBit(44, row, m_prevRegs, m_currRegs, Registers::SRBits::kC, "C");
     QString iplLevel = QString::asprintf("IPL=%u", (m_currRegs.m_value[Registers::SR] >> 8 & 0x7));
-    AddToken(39, row, iplLevel, TokenType::kNone);
+    AddToken(48, row, iplLevel, TokenType::kNone);
     row += 1;
 
     uint32_t ex = GET_REG(m_currRegs, EX);
@@ -468,6 +472,8 @@ void RegisterWidget::PopulateRegisters()
 
     if (m_pTargetModel->GetCpuLevel() >= TargetModel::CpuLevel::kCpuLevel68010)
     {
+        AddReg32(1, row, Registers::VBR, m_prevRegs, m_currRegs);
+        row++;
         AddReg32(1, row, Registers::DFC, m_prevRegs, m_currRegs); AddReg32(16, row, Registers::SFC, m_prevRegs, m_currRegs);
         row++;
     }
@@ -488,6 +494,30 @@ void RegisterWidget::PopulateRegisters()
         AddCACRBit(x+41, row, m_prevRegs, m_currRegs, Registers::CACRBits::FI, "FI");
         AddCACRBit(x+46, row, m_prevRegs, m_currRegs, Registers::CACRBits::EI, "EI");
         row++;
+        row++;
+    }
+
+    // 68030 mmu registers
+    if (m_pTargetModel->GetCpuLevel() == TargetModel::CpuLevel::kCpuLevel68030)
+    {
+        AddReg32(2, row, Registers::TC, m_prevRegs, m_currRegs); row++;
+        AddReg32(0, row, Registers::DTT0, m_prevRegs, m_currRegs); row++;
+        AddReg32(0, row, Registers::DTT1, m_prevRegs, m_currRegs); row++;
+        AddReg64(1, row, Registers::SRP, m_prevRegs, m_currRegs); row++;
+        AddReg64(1, row, Registers::CRP, m_prevRegs, m_currRegs); row++;
+        row++;
+    }
+
+	// 68040+ mmu registers
+    if (m_pTargetModel->GetCpuLevel() >= TargetModel::CpuLevel::kCpuLevel68040)
+    {
+        AddReg32(2, row, Registers::TC, m_prevRegs, m_currRegs); row++;
+        AddReg32(0, row, Registers::DTT0, m_prevRegs, m_currRegs); row++;
+        AddReg32(0, row, Registers::DTT1, m_prevRegs, m_currRegs); row++;
+        AddReg32(0, row, Registers::ITT0, m_prevRegs, m_currRegs); row++;
+        AddReg32(0, row, Registers::ITT1, m_prevRegs, m_currRegs); row++;
+        AddReg32(1, row, Registers::SRP, m_prevRegs, m_currRegs); row++;
+        AddReg32(1, row, Registers::URP, m_prevRegs, m_currRegs); row++;
         row++;
     }
 
@@ -513,7 +543,7 @@ void RegisterWidget::UpdateFont()
 
 QString RegisterWidget::FindSymbol(uint32_t addr)
 {
-    return DescribeSymbol(m_pTargetModel->GetSymbolTable(), addr & 0xffffff);
+    return DescribeSymbol(m_pTargetModel->GetSymbolTable(), addr & m_pTargetModel->GetAddressMask());
 }
 
 int RegisterWidget::AddToken(int x, int y, QString text, TokenType type, uint32_t subIndex, TokenColour colour)
@@ -550,6 +580,16 @@ int RegisterWidget::AddReg32(int x, int y, uint32_t regIndex, const Registers& p
     return AddToken(x + label.size() + 1, y, value, TokenType::kRegister, regIndex, highlight);
 }
 
+int RegisterWidget::AddReg64(int x, int y, uint32_t regIndex, const Registers& prevRegs, const Registers& regs)
+{
+    TokenColour highlight = ((regs.m_value[regIndex+0] != prevRegs.m_value[regIndex+0]) || (regs.m_value[regIndex+1] != prevRegs.m_value[regIndex+1])) ? kChanged : kNormal;
+
+    QString label = QString::asprintf("%s:",  Registers::s_names[regIndex]);
+    QString value = QString::asprintf("%08x%08x", regs.m_value[regIndex+1], regs.m_value[regIndex]);
+    AddToken(x, y, label, TokenType::kRegister, regIndex, TokenColour::kNormal);
+    return AddToken(x + label.size() + 1, y, value, TokenType::kRegister, regIndex, highlight);
+}
+
 int RegisterWidget::AddSRBit(int x, int y, const Registers& prevRegs, const Registers& regs, uint32_t bit, const char* pName)
 {
     uint32_t valNew = (regs.m_value[Registers::SR] >> bit) & 1;
@@ -572,11 +612,11 @@ int RegisterWidget::AddCACRBit(int x, int y, const Registers& prevRegs, const Re
 
 int RegisterWidget::AddSymbol(int x, int y, uint32_t address)
 {
-    QString symText = FindSymbol(address & 0xffffff);
+    QString symText = FindSymbol(address & m_pTargetModel->GetAddressMask());
     if (!symText.size())
         return x;
 
-    QString comment = DescribeSymbolComment(m_pTargetModel->GetSymbolTable(), address);
+    QString comment = DescribeSymbolComment(m_pTargetModel->GetSymbolTable(), address & m_pTargetModel->GetAddressMask());
     if (!comment.isEmpty())
         symText += " ;" + comment;
     return AddToken(x, y, symText, TokenType::kSymbol, address);

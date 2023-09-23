@@ -83,6 +83,7 @@ MemoryWidget::MemoryWidget(QWidget *parent, Session* pSession,
     m_isLocked(false),
     m_address(0),
     m_widthMode(k16),
+    m_memorySpace(kSpaceLogical),
     m_sizeMode(kModeByte),
     m_bytesPerRow(16),
     m_rowCount(1),
@@ -98,6 +99,7 @@ MemoryWidget::MemoryWidget(QWidget *parent, Session* pSession,
     m_memSlot = static_cast<MemorySlot>(MemorySlot::kMemoryView0 + m_windowIndex);
 
     UpdateFont();
+    SetMemorySpace(MemorySpace::kSpaceLogical);
     SetSizeMode(SizeMode::kModeByte);
     setFocus();
     setFocusPolicy(Qt::StrongFocus);
@@ -188,6 +190,13 @@ void MemoryWidget::SetLock(bool locked)
         RecalcLockedExpression();
         RequestMemory(kNoMoveCursor);
     }
+}
+
+void MemoryWidget::SetMemorySpace(MemoryWidget::MemorySpace space)
+{
+    m_memorySpace = space;
+    RecalcLockedExpression();
+    RequestMemory(kNoMoveCursor);    
 }
 
 void MemoryWidget::SetSizeMode(MemoryWidget::SizeMode mode)
@@ -578,7 +587,7 @@ void MemoryWidget::RecalcText()
             row.m_symbolId[col] = -1;
             if (info.type != ColumnType::kSpace)
             {
-                if (symTable.FindLowerOrEqual(charAddress & 0xffffff, true, sym))
+                if (symTable.FindLowerOrEqual(charAddress & m_pTargetModel->GetAddressMask(), true, sym))
                     row.m_symbolId[col] = (int)sym.index;
             }
             row.m_text[col] = outChar;
@@ -884,7 +893,24 @@ void MemoryWidget::RequestMemory(MemoryWidget::CursorMode moveCursor)
     uint32_t size = static_cast<uint32_t>(m_rowCount * m_bytesPerRow);
     if (m_pTargetModel->IsConnected())
     {
-        m_requestId = m_pDispatcher->ReadMemory(m_memSlot, m_address, size);
+        uint32_t flags;
+        switch (GetMemorySpace())
+        {
+            default:
+            case kSpacePhysical:
+                flags = Dispatcher::MemoryFlags::kMemFlagPhysical;
+                break;
+            case kSpaceLogical:
+                flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagData;
+                break;
+            case kSpaceLogicalSuper:
+                flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagData | Dispatcher::MemoryFlags::kMemFlagSuper;
+                break;
+            case kSpaceLogicalUser:
+                flags = Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagData | Dispatcher::MemoryFlags::kMemFlagUser;
+                break;
+        }
+        m_requestId = m_pDispatcher->ReadMemory(m_memSlot, m_address, size, flags);
         m_requestCursorMode = moveCursor;
     }
 }
@@ -1013,7 +1039,7 @@ QString MemoryWidget::CalcMouseoverText(int mouseX, int mouseY)
     uint32_t longVal;
     if (!mem->ReadAddressMulti(addrLong, 4, longVal))
         return QString();
-    return CreateTooltip(addr, m_pTargetModel->GetSymbolTable(), byteVal, wordVal, longVal);
+    return CreateTooltip(addr & m_pTargetModel->GetAddressMask(), m_pTargetModel->GetSymbolTable(), byteVal, wordVal, longVal);
 }
 
 void MemoryWidget::UpdateFont()
@@ -1069,7 +1095,7 @@ void MemoryWidget::ContextMenu(int row, int col, QPoint globalPos)
         uint32_t longContents;
         if (mem->ReadAddressMulti(addr, 4, longContents))
         {
-            longContents &= 0xffffff;
+            longContents &= m_pTargetModel->GetAddressMask();
             m_showAddressMenus[1].setAddress(m_pSession, longContents);
             m_showAddressMenus[1].setTitle(QString::asprintf("Pointer Address: $%x", longContents));
             menu.addMenu(m_showAddressMenus[1].m_pMenu);
@@ -1129,6 +1155,13 @@ MemoryWindow::MemoryWindow(QWidget *parent, Session* pSession, int windowIndex) 
     m_pLockCheckBox = new QCheckBox(tr("Lock"), this);
     m_pCursorInfoLabel = new ElidedLabel("", this);
 
+    m_pMemorySpaceComboBox = new QComboBox(this);
+    m_pMemorySpaceComboBox->insertItem(MemoryWidget::kSpacePhysical, "Physical");
+    m_pMemorySpaceComboBox->insertItem(MemoryWidget::kSpaceLogical, "Logical");
+    m_pMemorySpaceComboBox->insertItem(MemoryWidget::kSpaceLogicalSuper, "Logical (Super)");
+    m_pMemorySpaceComboBox->insertItem(MemoryWidget::kSpaceLogicalUser, "Logical (User)");
+    m_pMemorySpaceComboBox->setCurrentIndex(m_pMemoryWidget->GetMemorySpace());
+
     m_pSizeModeComboBox = new QComboBox(this);
     m_pSizeModeComboBox->insertItem(MemoryWidget::kModeByte, "Byte");
     m_pSizeModeComboBox->insertItem(MemoryWidget::kModeWord, "Word");
@@ -1146,17 +1179,29 @@ MemoryWindow::MemoryWindow(QWidget *parent, Session* pSession, int windowIndex) 
 
     // Layouts
     QVBoxLayout* pMainLayout = new QVBoxLayout;
-    QHBoxLayout* pTopLayout = new QHBoxLayout;
+    QVBoxLayout* pTopLayout = new QVBoxLayout;
+    QHBoxLayout* pTopButtonLayout = new QHBoxLayout;
+    QHBoxLayout* pTopAddressLayout = new QHBoxLayout;
     auto pMainRegion = new QWidget(this);   // whole panel
-    auto pTopRegion = new QWidget(this);      // top buttons/edits
+    auto pTopRegion = new QWidget(this);   // display settings
 
-    SetMargins(pTopLayout);
-    pTopLayout->addWidget(m_pAddressEdit);
-    pTopLayout->addWidget(m_pLockCheckBox);
-    pTopLayout->addWidget(m_pSizeModeComboBox);
-    pTopLayout->addWidget(m_pWidthComboBox);
+    SetMargins(pTopAddressLayout);
+    pTopAddressLayout->addWidget(m_pAddressEdit);
+    pTopAddressLayout->addWidget(m_pLockCheckBox);
 
-    SetMargins(pMainLayout);
+    pTopButtonLayout->setSpacing(0);
+    pTopButtonLayout->setContentsMargins(0,0,0,0);
+    pTopButtonLayout->addWidget(m_pMemorySpaceComboBox);
+    pTopButtonLayout->addWidget(m_pSizeModeComboBox);
+    pTopButtonLayout->addWidget(m_pWidthComboBox);
+
+    pTopLayout->setSpacing(0);
+    pTopLayout->setContentsMargins(0,0,0,0);
+    pTopLayout->addLayout(pTopAddressLayout);
+    pTopLayout->addLayout(pTopButtonLayout);
+
+    pMainLayout->setSpacing(0);
+    pMainLayout->setContentsMargins(0,0,0,0);
     pMainLayout->addWidget(pTopRegion);
     pMainLayout->addWidget(m_pMemoryWidget);
     pMainLayout->addWidget(m_pCursorInfoLabel);
@@ -1180,6 +1225,7 @@ MemoryWindow::MemoryWindow(QWidget *parent, Session* pSession, int windowIndex) 
     connect(m_pMemoryWidget, &MemoryWidget::cursorChangedSignal,     this, &MemoryWindow::cursorChangedSlot);
     connect(m_pTargetModel,  &TargetModel::searchResultsChangedSignal, this, &MemoryWindow::searchResultsSlot);
 
+    connect(m_pMemorySpaceComboBox,  SIGNAL(currentIndexChanged(int)), SLOT(memorySpaceComboBoxChangedSlot(int)));
     connect(m_pSizeModeComboBox,     SIGNAL(currentIndexChanged(int)), SLOT(sizeModeComboBoxChangedSlot(int)));
     connect(m_pWidthComboBox,        SIGNAL(currentIndexChanged(int)), SLOT(widthComboBoxChangedSlot(int)));
 }
@@ -1198,9 +1244,13 @@ void MemoryWindow::loadSettings()
 
     restoreGeometry(settings.value("geometry").toByteArray());
 
+    int space = settings.value("space", QVariant(MemoryWidget::kSpaceLogical)).toInt();
+    m_pMemoryWidget->SetMemorySpace(static_cast<MemoryWidget::MemorySpace>(space));
+
     int mode = settings.value("mode", QVariant(MemoryWidget::kModeByte)).toInt();
     m_pMemoryWidget->SetSizeMode(static_cast<MemoryWidget::SizeMode>(mode));
     // Sync UI
+    m_pMemorySpaceComboBox->setCurrentIndex(m_pMemoryWidget->GetMemorySpace());
     m_pSizeModeComboBox->setCurrentIndex(m_pMemoryWidget->GetSizeMode());
 
     QVariant widthMode = settings.value("widthMode", QVariant(MemoryWidget::k16));
@@ -1219,6 +1269,7 @@ void MemoryWindow::saveSettings()
     settings.beginGroup(key);
 
     settings.setValue("geometry", saveGeometry());
+    settings.setValue("space", static_cast<int>(m_pMemoryWidget->GetMemorySpace()));
     settings.setValue("mode", static_cast<int>(m_pMemoryWidget->GetSizeMode()));
     settings.setValue("widthMode", static_cast<int>(m_pMemoryWidget->GetWidthMode()));
     settings.endGroup();
@@ -1248,12 +1299,12 @@ void MemoryWindow::cursorChangedSlot()
     {
         QString final;
         QTextStream ref(&final);
-        ref << QString("Cursor: ") << Format::to_hex32(info.m_address & 0xffffff);
-        QString symText = DescribeSymbol(m_pTargetModel->GetSymbolTable(), info.m_address & 0xffffff);
+        ref << QString("Cursor: ") << Format::to_hex32(info.m_address & m_pTargetModel->GetAddressMask());
+        QString symText = DescribeSymbol(m_pTargetModel->GetSymbolTable(), info.m_address & m_pTargetModel->GetAddressMask());
         if (!symText.isEmpty())
             ref << " (" + symText + ")";
 
-        QString commentText = DescribeSymbolComment(m_pTargetModel->GetSymbolTable(), info.m_address);
+        QString commentText = DescribeSymbolComment(m_pTargetModel->GetSymbolTable(), info.m_address & m_pTargetModel->GetAddressMask());
         if (!commentText.isEmpty())
             ref << " " + commentText;
 
@@ -1280,6 +1331,11 @@ void MemoryWindow::textEditedSlot()
 void MemoryWindow::lockChangedSlot()
 {
     m_pMemoryWidget->SetLock(m_pLockCheckBox->isChecked());
+}
+
+void MemoryWindow::memorySpaceComboBoxChangedSlot(int index)
+{
+    m_pMemoryWidget->SetMemorySpace((MemoryWidget::MemorySpace)index);
 }
 
 void MemoryWindow::sizeModeComboBoxChangedSlot(int index)

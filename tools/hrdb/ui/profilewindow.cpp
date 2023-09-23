@@ -363,7 +363,9 @@ ProfileWindow::ProfileWindow(QWidget *parent, Session* pSession) :
     pMainLayout->addWidget(m_pTableView);
 
     SetMargins(pTopLayout);
-    SetMargins(pMainLayout);
+
+    pMainLayout->setSpacing(0);
+    pMainLayout->setContentsMargins(0,0,0,0);
 
     pTopRegion->setLayout(pTopLayout);
     pMainRegion->setLayout(pMainLayout);

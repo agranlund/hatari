@@ -73,7 +73,9 @@ public:
         kCpuLevel68000 = 0,
         kCpuLevel68010 = 1,
         kCpuLevel68020 = 2,
-        kCpuLevel68030 = 3
+        kCpuLevel68030 = 3,
+        kCpuLevel68040 = 4,
+        kCpuLevel68060 = 6,
     };
 
     TargetModel();
@@ -125,6 +127,8 @@ public:
     // User-added console command. Anything can happen!
     void ConsoleCommand();
 
+    void LogMessage(const char* pStr);
+
     // User-inserted dummy command to signal e.g. end of a series of updates
     // emits flushSignal()
     void Flush(uint64_t commmandId);
@@ -133,6 +137,9 @@ public:
 	// NOTE: all these return copies to avoid data contention
     MACHINETYPE	GetMachineType() const { return m_machineType; }
     int GetCpuLevel() const { return m_cpuLevel; }
+
+    uint32_t GetAddressMask() const { return m_cpuLevel > 0 ? 0xffffffff : 0x00ffffff; }
+    uint32_t GetVbr() const { return m_cpuLevel > 0 ? GetRegs().Get(Registers::VBR) : 0; }
 
     // Get RAM size in bytes
     uint32_t GetSTRamSize() const { return m_stRamSize; }
@@ -206,6 +213,10 @@ signals:
 
     // Profile data changed
     void profileChangedSignal();
+
+    // Log message received
+    void logReceivedSignal(const char* pStr);
+
 private slots:
 
     // Called shortly after stop notification received

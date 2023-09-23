@@ -350,6 +350,14 @@ bool StringParsers::ParseExpression(const char *pText, uint32_t &result, const S
             continue;
         }
 
+
+        // Hex constant (0x format)
+        if ((head == '0') && (*pText == 'x'))
+        {
+            head = '$';
+            pText++;
+        }
+
         if (head == '$')
         {
             // Hex constant

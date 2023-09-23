@@ -60,9 +60,9 @@ uint64_t Dispatcher::InsertFlush()
     return pNewCmd->m_uid;
 }
 
-uint64_t Dispatcher::ReadMemory(MemorySlot slot, uint32_t address, uint32_t size)
+uint64_t Dispatcher::ReadMemory(MemorySlot slot, uint32_t address, uint32_t size, uint32_t flags)
 {
-    std::string command = std::string("mem ") + std::to_string(address) + " " + std::to_string(size);
+    std::string command = std::string("mem ") + std::to_string(address) + " " + std::to_string(size) + " " + std::to_string(flags);
     return SendCommandShared(slot, command);
 }
 
@@ -86,9 +86,9 @@ uint64_t Dispatcher::ReadSymbols()
     return SendCommandPacket("symlist");
 }
 
-uint64_t Dispatcher::WriteMemory(uint32_t address, const QVector<uint8_t> &data)
+uint64_t Dispatcher::WriteMemory(uint32_t address, const QVector<uint8_t> &data, uint32_t flags)
 {
-    QString command = QString::asprintf("memset %u %d ", address, data.size());
+    QString command = QString::asprintf("memset %u %d %u ", address, data.size(), (uint32_t)flags);
     for (int i = 0; i <  data.size(); ++i)
         command += QString::asprintf("%02x", data[i]);
 
@@ -158,14 +158,6 @@ uint64_t Dispatcher::SetRegister(int reg, uint32_t val)
 uint64_t Dispatcher::SetExceptionMask(uint32_t mask)
 {
     return SendCommandPacket(QString::asprintf("exmask %u", mask).toStdString().c_str());
-}
-
-uint64_t Dispatcher::SetLoggingFile(const std::string& filename)
-{
-    // Tell the target to redirect
-    std::string cmd("setstd ");
-    cmd += filename;
-    return SendCommandPacket(cmd.c_str());
 }
 
 uint64_t Dispatcher::SetProfileEnable(bool enable)
@@ -692,6 +684,12 @@ void Dispatcher::ReceiveNotification(const RemoteNotification& cmd)
             ++numDeltas;
         }
         m_pTargetModel->ProfileDeltaComplete(static_cast<int>(enabled));
+    }
+    else if (type == "!log")
+    {
+        std::string logStr = s.Split(SEP_CHAR);
+        m_pTargetModel->LogMessage(logStr.c_str());
+        this->InsertFlush();
     }
 }
 

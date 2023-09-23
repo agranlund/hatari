@@ -197,10 +197,15 @@ void TargetModel::ProfileReset()
 // to update
 void TargetModel::ConsoleCommand()
 {
-    emit otherMemoryChangedSignal(0, 0xffffff);
+    emit otherMemoryChangedSignal(0, GetAddressMask());
     emit breakpointsChangedSignal(0);
     emit symbolTableChangedSignal(0);
     emit exceptionMaskChanged();
+}
+
+void TargetModel::LogMessage(const char* pStr)
+{
+    emit logReceivedSignal(pStr);
 }
 
 void TargetModel::Flush(uint64_t commmandId)

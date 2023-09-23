@@ -10,7 +10,6 @@
 #include <QTextStream>
 #include <QTextEdit>
 #include <QDebug>
-#include <QFileSystemWatcher>
 
 #include "../transport/dispatcher.h"
 #include "../models/targetmodel.h"
@@ -23,8 +22,7 @@ ConsoleWindow::ConsoleWindow(QWidget *parent, Session* pSession) :
     QDockWidget(parent),
     m_pSession(pSession),
     m_pTargetModel(pSession->m_pTargetModel),
-    m_pDispatcher(pSession->m_pDispatcher),
-    m_pWatcher(nullptr)
+    m_pDispatcher(pSession->m_pDispatcher)
 {
     this->setWindowTitle("Console");
     setObjectName("Console");
@@ -41,7 +39,9 @@ ConsoleWindow::ConsoleWindow(QWidget *parent, Session* pSession) :
 
     SetMargins(pTopLayout);
     pTopLayout->addWidget(m_pLineEdit);
-    SetMargins(pMainLayout);
+
+    pMainLayout->setSpacing(0);
+    pMainLayout->setContentsMargins(0,0,0,0);
     pMainLayout->addWidget(pTopRegion);
     pMainLayout->addWidget(m_pTextArea);
 
@@ -52,6 +52,7 @@ ConsoleWindow::ConsoleWindow(QWidget *parent, Session* pSession) :
     loadSettings();
 
     connect(m_pTargetModel,  &TargetModel::connectChangedSignal, this, &ConsoleWindow::connectChanged);
+    connect(m_pTargetModel,  &TargetModel::logReceivedSignal,    this, &ConsoleWindow::logMessage);
     connect(m_pSession,      &Session::settingsChanged,          this, &ConsoleWindow::settingsChanged);
     // Connect text entry
     connect(m_pLineEdit,     &QLineEdit::returnPressed,          this, &ConsoleWindow::textEditChanged);
@@ -65,7 +66,6 @@ ConsoleWindow::ConsoleWindow(QWidget *parent, Session* pSession) :
 
 ConsoleWindow::~ConsoleWindow()
 {
-    deleteWatcher();
 }
 
 void ConsoleWindow::keyFocus()
@@ -92,39 +92,19 @@ void ConsoleWindow::saveSettings()
     settings.endGroup();
 }
 
+void ConsoleWindow::logMessage(const char* pStr)
+{
+    QString data(pStr);
+    m_pTextArea->moveCursor(QTextCursor::End);
+    m_pTextArea->insertPlainText(data);
+    m_pTextArea->moveCursor(QTextCursor::End);
+
+}
+
 void ConsoleWindow::connectChanged()
 {
     bool enable = m_pTargetModel->IsConnected();
     m_pLineEdit->setEnabled(enable);
-
-    if (m_pTargetModel->IsConnected())
-    {
-        // Experimental: force Hatari output to a file
-        if (m_pTargetModel->IsConnected())
-        {
-            deleteWatcher();
-
-            // Open the temp file
-            m_pSession->m_pLoggingFile->open();
-            QString filename = m_pSession->m_pLoggingFile->fileName();
-
-            // Need to open a file watcher here
-            m_pWatcher = new QFileSystemWatcher(this);
-            m_pWatcher->addPath(m_pSession->m_pLoggingFile->fileName());
-            connect(m_pWatcher, &QFileSystemWatcher::fileChanged,   this, &ConsoleWindow::fileChanged);
-
-            // Create a reader
-            m_tempFile.setFileName(filename);
-            m_tempFile.open(QIODevice::ReadOnly| QIODevice::Unbuffered);
-            m_tempFileTextStream.setDevice(&m_tempFile);
-
-            m_pDispatcher->SetLoggingFile(filename.toStdString());
-        }
-    }
-    else
-    {
-        deleteWatcher();
-    }
 }
 
 void ConsoleWindow::settingsChanged()
@@ -136,33 +116,10 @@ void ConsoleWindow::textEditChanged()
 {
     if (m_pTargetModel->IsConnected() && !m_pTargetModel->IsRunning())
     {
+        m_pTextArea->moveCursor(QTextCursor::End);
+        m_pTextArea->append(QString(">>") + m_pLineEdit->text() + QString("\n"));
+        m_pTextArea->moveCursor(QTextCursor::End);
         m_pDispatcher->SendConsoleCommand(m_pLineEdit->text().toStdString());
-        m_pTextArea->append(QString(">>") + m_pLineEdit->text());
     }
     m_pLineEdit->clear();
-}
-
-void ConsoleWindow::fileChanged(const QString& filename)
-{
-    Q_ASSERT(filename == m_tempFile.fileName());
-
-    // Read whatever possible from file
-    QString data;
-    data = m_tempFileTextStream.readLine();
-    while (!data.isNull())
-    {
-        m_pTextArea->append(data);
-        data = m_tempFileTextStream.readLine();
-    }
-}
-
-void ConsoleWindow::deleteWatcher()
-{
-    if (m_pWatcher)
-    {
-        m_tempFile.close();
-        disconnect(m_pWatcher, &QFileSystemWatcher::fileChanged,   this, &ConsoleWindow::fileChanged);
-        delete m_pWatcher;
-        m_pWatcher = nullptr;
-    }
 }

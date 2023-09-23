@@ -73,17 +73,17 @@ MainWindow::MainWindow(Session& session, QWidget *parent)
     {
         m_pDisasmWidgets[i] = new DisasmWindow(this, &m_session, i);
         if (i == 0)
-            m_pDisasmWidgets[i]->setWindowTitle("Disassembly 1 (Alt+D)");
+            m_pDisasmWidgets[i]->setWindowTitle("Disassembly 1 (Ctrl+D)");
         else
             m_pDisasmWidgets[i]->setWindowTitle(QString::asprintf("Disassembly %d", i + 1));
     }
 
     static const char* windowTitles[4] =
     {
-        "Memory 1 (Alt+M)",
-        "Memory 2 (Alt+2)",
-        "Memory 3 (Alt+3)",
-        "Memory 4 (Alt+4)"
+        "Memory 1 (Ctr+M)",
+        "Memory 2 (Ctrl+2)",
+        "Memory 3 (Ctrl+3)",
+        "Memory 4 (Ctrl+4)"
     };
 
     for (int i = 0; i < kNumMemoryViews; ++i)
@@ -93,13 +93,13 @@ MainWindow::MainWindow(Session& session, QWidget *parent)
     }
 
     m_pGraphicsInspector = new GraphicsInspectorWidget(this, &m_session);
-    m_pGraphicsInspector->setWindowTitle("Graphics Inspector (Alt+G)");
+    m_pGraphicsInspector->setWindowTitle("Graphics Inspector (Ctrl+G)");
     m_pBreakpointsWidget = new BreakpointsWindow(this, &m_session);
-    m_pBreakpointsWidget->setWindowTitle("Breakpoints (Alt+B)");
+    m_pBreakpointsWidget->setWindowTitle("Breakpoints (Ctrl+B)");
     m_pConsoleWindow = new ConsoleWindow(this, &m_session);
 
     m_pHardwareWindow = new HardwareWindow(this, &m_session);
-    m_pHardwareWindow->setWindowTitle("Hardware (Alt+H)");
+    m_pHardwareWindow->setWindowTitle("Hardware (Ctrl+H)");
     m_pProfileWindow = new ProfileWindow(this, &m_session);
 
     m_pExceptionDialog = new ExceptionDialog(this, m_pTargetModel, m_pDispatcher);
@@ -124,7 +124,8 @@ MainWindow::MainWindow(Session& session, QWidget *parent)
     //hlayout->setAlignment(m_pRunToCombo, Qt::Align);
     pTopGroupBox->setLayout(hlayout);
 
-    SetMargins(vlayout);
+    vlayout->setSpacing(0);
+    vlayout->setContentsMargins(0,0,0,0);
     vlayout->addWidget(pTopGroupBox);
     vlayout->addWidget(m_pRegisterWidget);
     vlayout->setAlignment(Qt::Alignment(Qt::AlignTop));
@@ -623,7 +624,7 @@ void MainWindow::requestMainState(uint32_t pc)
     // This is the memory for the current instruction.
     // It's used by this and Register windows.
     // *** NOTE this code assumes PC register is already available ***
-    m_pDispatcher->ReadMemory(MemorySlot::kMainPC, pc, 10);
+    m_pDispatcher->ReadMemory(MemorySlot::kMainPC, pc, 10, Dispatcher::MemoryFlags::kMemFlagLogical | Dispatcher::MemoryFlags::kMemFlagProgram);
     m_pDispatcher->ReadBreakpoints();
     m_pDispatcher->ReadExceptionMask();
 
@@ -642,13 +643,13 @@ void MainWindow::createActions()
     // "File"
     m_pLaunchAct = new QAction(tr("&Launch..."), this);
     m_pLaunchAct->setStatusTip(tr("Launch Hatari"));
-    m_pLaunchAct->setShortcut(QKeySequence("Alt+L"));
+    m_pLaunchAct->setShortcut(QKeySequence("Ctrl+L"));
     connect(m_pLaunchAct, &QAction::triggered, this, &MainWindow::LaunchTriggered);
 
     // "Quicklaunch"
     m_pQuickLaunchAct = new QAction(tr("&QuickLaunch"), this);
     m_pQuickLaunchAct->setStatusTip(tr("Launch Hatari with previous settings"));
-    m_pQuickLaunchAct->setShortcut(QKeySequence("Alt+Q"));
+    m_pQuickLaunchAct->setShortcut(QKeySequence("Ctrl+Q"));
     connect(m_pQuickLaunchAct, &QAction::triggered, this, &MainWindow::QuickLaunchTriggered);
 
     m_pConnectAct = new QAction(tr("&Connect"), this);
@@ -690,15 +691,15 @@ void MainWindow::createActions()
         m_pDisasmWindowActs[i]->setCheckable(true);
 
         if (i == 0)
-            m_pDisasmWindowActs[i]->setShortcut(QKeySequence("Alt+D"));
+            m_pDisasmWindowActs[i]->setShortcut(QKeySequence("Ctrl+D"));
     }
 
     static const char* windowShortcuts[4] =
     {
-        "Alt+M",
-        "Alt+2",
-        "Alt+3",
-        "Alt+4"
+        "Ctrl+M",
+        "Ctrl+2",
+        "Ctrl+3",
+        "Ctrl+4"
     };
     for (int i = 0; i < kNumMemoryViews; ++i)
     {
@@ -709,27 +710,27 @@ void MainWindow::createActions()
     }
 
     m_pGraphicsInspectorAct = new QAction(tr("&Graphics Inspector"), this);
-    m_pGraphicsInspectorAct->setShortcut(QKeySequence("Alt+G"));
+    m_pGraphicsInspectorAct->setShortcut(QKeySequence("Ctrl+G"));
     m_pGraphicsInspectorAct->setStatusTip(tr("Show the Graphics Inspector"));
     m_pGraphicsInspectorAct->setCheckable(true);
 
     m_pBreakpointsWindowAct = new QAction(tr("&Breakpoints"), this);
-    m_pBreakpointsWindowAct->setShortcut(QKeySequence("Alt+B"));
+    m_pBreakpointsWindowAct->setShortcut(QKeySequence("Ctrl+B"));
     m_pBreakpointsWindowAct->setStatusTip(tr("Show the Breakpoints window"));
     m_pBreakpointsWindowAct->setCheckable(true);
 
     m_pConsoleWindowAct = new QAction(tr("&Console"), this);
-    m_pConsoleWindowAct->setShortcut(QKeySequence("Alt+C"));
+    m_pConsoleWindowAct->setShortcut(QKeySequence("Ctrl+C"));
     m_pConsoleWindowAct->setStatusTip(tr("Show the Console window"));
     m_pConsoleWindowAct->setCheckable(true);
 
     m_pHardwareWindowAct = new QAction(tr("&Hardware"), this);
-    m_pHardwareWindowAct->setShortcut(QKeySequence("Alt+H"));
+    m_pHardwareWindowAct->setShortcut(QKeySequence("Ctrl+H"));
     m_pHardwareWindowAct->setStatusTip(tr("Show the Hardware window"));
     m_pHardwareWindowAct->setCheckable(true);
 
     m_pProfileWindowAct = new QAction(tr("&Profile"), this);
-    m_pProfileWindowAct->setShortcut(QKeySequence("Alt+P"));
+    m_pProfileWindowAct->setShortcut(QKeySequence("Ctrl+P"));
     m_pProfileWindowAct->setStatusTip(tr("Show the Profile window"));
     m_pProfileWindowAct->setCheckable(true);
 

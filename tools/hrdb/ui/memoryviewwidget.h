@@ -26,6 +26,14 @@ public:
         kColCount
     };
 
+    enum MemorySpace
+    {
+        kSpacePhysical,
+        kSpaceLogical,
+        kSpaceLogicalSuper,
+        kSpaceLogicalUser,
+    };
+
     enum SizeMode
     {
         kModeByte,
@@ -53,6 +61,7 @@ public:
     virtual ~MemoryWidget();
 
     uint32_t GetRowCount() const { return m_rowCount; }
+    MemorySpace GetMemorySpace() const { return m_memorySpace; }
     SizeMode GetSizeMode() const { return m_sizeMode; }
     WidthMode GetWidthMode() const { return m_widthMode; }
     const CursorInfo& GetCursorInfo() const { return m_cursorInfo; }
@@ -65,6 +74,7 @@ public:
     void SetSearchResultAddress(uint32_t addr);
 
     void SetLock(bool locked);
+    void SetMemorySpace(MemorySpace space);
     void SetSizeMode(SizeMode mode);
     void SetWidthMode(WidthMode widthMode);
 
@@ -86,6 +96,7 @@ private:
         uint32_t address;
         int rowCount;
         int bytesPerRow;
+        MemorySpace memorySpace;
         SizeMode sizeMode;
     };
 
@@ -195,6 +206,7 @@ private:
     // If anything changes
     uint32_t    m_address;
     WidthMode   m_widthMode;
+    MemorySpace m_memorySpace;
     SizeMode    m_sizeMode;
     int         m_bytesPerRow;
     int         m_rowCount;
@@ -253,6 +265,7 @@ public slots:
     void cursorChangedSlot();
     void textEditedSlot();
     void lockChangedSlot();
+    void memorySpaceComboBoxChangedSlot(int index);
     void sizeModeComboBoxChangedSlot(int index);
     void widthComboBoxChangedSlot(int index);
     void findClickedSlot();
@@ -263,6 +276,7 @@ public slots:
 
 private:
     QLineEdit*          m_pAddressEdit;
+    QComboBox*          m_pMemorySpaceComboBox;
     QComboBox*          m_pSizeModeComboBox;
     QComboBox*          m_pWidthComboBox;
     QCheckBox*          m_pLockCheckBox;
