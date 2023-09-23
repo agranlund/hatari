@@ -433,7 +433,7 @@ void RegisterWidget::PopulateRegisters()
     AddSRBit(15, row, m_prevRegs, m_currRegs, Registers::SRBits::kTrace0, "T0");
 
     AddSRBit(20, row, m_prevRegs, m_currRegs, Registers::SRBits::kSupervisor, "S");
-    AddSRBit(24, row, m_prevRegs, m_currRegs, Registers::SRBits::kSupervisor, "M");
+    AddSRBit(24, row, m_prevRegs, m_currRegs, Registers::SRBits::kMaster, "M");
 
     AddSRBit(28, row, m_prevRegs, m_currRegs, Registers::SRBits::kX, "X");
     AddSRBit(32, row, m_prevRegs, m_currRegs, Registers::SRBits::kN, "N");
